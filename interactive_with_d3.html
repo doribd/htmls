@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D3.js Interactive Multicolor Animation</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #0a0a0a;
+            font-family: Arial, sans-serif;
+        }
+        
+        #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        
+        .info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 14px;
+            background: rgba(0,0,0,0.5);
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+        
+        .particle {
+            mix-blend-mode: screen;
+            cursor: pointer;
+        }
+        
+        .trail {
+            opacity: 0.3;
+            mix-blend-mode: screen;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div class="info">
+            <h3>Interactive D3.js Animation</h3>
+            <p>🖱️ Move mouse to attract particles</p>
+            <p>🎯 Click to create explosion</p>
+            <p>🔄 Double-click to reset</p>
+            <p>⚡ Hover over particles for effects</p>
+        </div>
+        <svg id="canvas"></svg>
+    </div>
+
+    <script>
+        // Set up dimensions
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        
+        // Create SVG
+        const svg = d3.select("#canvas")
+            .attr("width", width)
+            .attr("height", height);
+        
+        // Create gradient definitions
+        const defs = svg.append("defs");
+        
+        // Add glow filter
+        const filter = defs.append("filter")
+            .attr("id", "glow");
+        
+        filter.append("feGaussianBlur")
+            .attr("stdDeviation", "3.5")
+            .attr("result", "coloredBlur");
+        
+        const feMerge = filter.append("feMerge");
+        feMerge.append("feMergeNode")
+            .attr("in", "coloredBlur");
+        feMerge.append("feMergeNode")
+            .attr("in", "SourceGraphic");
+        
+        // Color palette
+        const colors = [
+            "#FF006E", "#FB5607", "#FFBE0B", "#8338EC", "#3A86FF",
+            "#06FFB4", "#FF4365", "#00F5FF", "#FF6B6B", "#4ECDC4"
+        ];
+        
+        // Particle data
+        let particles = d3.range(100).map(i => ({
+            id: i,
+            x: Math.random() * width,
+            y: Math.random() * height,
+            vx: (Math.random() - 0.5) * 2,
+            vy: (Math.random() - 0.5) * 2,
+            radius: Math.random() * 20 + 10,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            trail: []
+        }));
+        
+        // Mouse position
+        let mouse = { x: width / 2, y: height / 2 };
+        
+        // Create particle groups
+        const particleGroups = svg.selectAll(".particle-group")
+            .data(particles)
+            .enter()
+            .append("g")
+            .attr("class", "particle-group");
+        
+        // Add trails
+        const trails = particleGroups.append("path")
+            .attr("class", "trail")
+            .attr("fill", "none")
+            .attr("stroke", d => d.color)
+            .attr("stroke-width", 2);
+        
+        // Add particles
+        const particleElements = particleGroups.append("circle")
+            .attr("class", "particle")
+            .attr("r", d => d.radius)
+            .attr("fill", d => d.color)
+            .attr("filter", "url(#glow)")
+            .on("mouseover", function(event, d) {
+                d3.select(this)
+                    .transition()
+                    .duration(200)
+                    .attr("r", d.radius * 1.5);
+            })
+            .on("mouseout", function(event, d) {
+                d3.select(this)
+                    .transition()
+                    .duration(200)
+                    .attr("r", d.radius);
+            })
+            .on("click", function(event, d) {
+                event.stopPropagation();
+                explodeParticle(d);
+            });
+        
+        // Force simulation
+        const simulation = d3.forceSimulation(particles)
+            .force("charge", d3.forceManyBody().strength(-50))
+            .force("collision", d3.forceCollide().radius(d => d.radius + 5))
+            .alphaDecay(0)
+            .velocityDecay(0.01);
+        
+        // Update positions
+        simulation.on("tick", () => {
+            particles.forEach(p => {
+                // Add mouse attraction
+                const dx = mouse.x - p.x;
+                const dy = mouse.y - p.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < 200) {
+                    const force = (200 - dist) / 200 * 0.5;
+                    p.vx += dx / dist * force;
+                    p.vy += dy / dist * force;
+                }
+                
+                // Update position
+                p.x += p.vx;
+                p.y += p.vy;
+                
+                // Bounce off walls
+                if (p.x < p.radius || p.x > width - p.radius) {
+                    p.vx *= -0.9;
+                    p.x = Math.max(p.radius, Math.min(width - p.radius, p.x));
+                }
+                if (p.y < p.radius || p.y > height - p.radius) {
+                    p.vy *= -0.9;
+                    p.y = Math.max(p.radius, Math.min(height - p.radius, p.y));
+                }
+                
+                // Update trail
+                p.trail.push({ x: p.x, y: p.y });
+                if (p.trail.length > 20) {
+                    p.trail.shift();
+                }
+            });
+            
+            // Update visual positions
+            particleElements
+                .attr("cx", d => d.x)
+                .attr("cy", d => d.y);
+            
+            // Update trails
+            trails.attr("d", d => {
+                if (d.trail.length < 2) return "";
+                return d3.line()
+                    .x(p => p.x)
+                    .y(p => p.y)
+                    .curve(d3.curveBasis)(d.trail);
+            });
+        });
+        
+        // Mouse tracking
+        svg.on("mousemove", function(event) {
+            const [x, y] = d3.pointer(event);
+            mouse.x = x;
+            mouse.y = y;
+        });
+        
+        // Click to create explosion
+        svg.on("click", function(event) {
+            const [x, y] = d3.pointer(event);
+            createExplosion(x, y);
+        });
+        
+        // Double click to reset
+        svg.on("dblclick", function(event) {
+            event.preventDefault();
+            particles.forEach(p => {
+                p.vx = (Math.random() - 0.5) * 2;
+                p.vy = (Math.random() - 0.5) * 2;
+                p.color = colors[Math.floor(Math.random() * colors.length)];
+            });
+            
+            particleElements
+                .transition()
+                .duration(500)
+                .attr("fill", d => d.color);
+            
+            trails
+                .transition()
+                .duration(500)
+                .attr("stroke", d => d.color);
+        });
+        
+        // Create explosion effect
+        function createExplosion(x, y) {
+            const explosionParticles = d3.range(20).map(i => ({
+                x: x,
+                y: y,
+                vx: (Math.random() - 0.5) * 20,
+                vy: (Math.random() - 0.5) * 20,
+                radius: Math.random() * 5 + 2,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                life: 1
+            }));
+            
+            const explosion = svg.selectAll(".explosion")
+                .data(explosionParticles)
+                .enter()
+                .append("circle")
+                .attr("class", "explosion")
+                .attr("cx", d => d.x)
+                .attr("cy", d => d.y)
+                .attr("r", d => d.radius)
+                .attr("fill", d => d.color)
+                .attr("filter", "url(#glow)");
+            
+            // Animate explosion
+            const explosionTimer = d3.timer((elapsed) => {
+                explosionParticles.forEach(p => {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.life -= 0.02;
+                    p.vx *= 0.98;
+                    p.vy *= 0.98;
+                });
+                
+                explosion
+                    .attr("cx", d => d.x)
+                    .attr("cy", d => d.y)
+                    .attr("opacity", d => d.life);
+                
+                if (explosionParticles[0].life <= 0) {
+                    explosion.remove();
+                    explosionTimer.stop();
+                }
+            });
+            
+            // Push nearby particles
+            particles.forEach(p => {
+                const dx = p.x - x;
+                const dy = p.y - y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < 150 && dist > 0) {
+                    const force = (150 - dist) / 150 * 10;
+                    p.vx += dx / dist * force;
+                    p.vy += dy / dist * force;
+                }
+            });
+        }
+        
+        // Explode individual particle
+        function explodeParticle(particle) {
+            const tempRadius = particle.radius;
+            particle.radius = 0;
+            
+            d3.select(particleElements.nodes()[particle.id])
+                .transition()
+                .duration(300)
+                .attr("r", tempRadius * 3)
+                .attr("opacity", 0)
+                .transition()
+                .duration(100)
+                .attr("r", tempRadius)
+                .attr("opacity", 1)
+                .on("end", () => {
+                    particle.radius = tempRadius;
+                });
+            
+            // Change color
+            particle.color = colors[Math.floor(Math.random() * colors.length)];
+            d3.select(particleElements.nodes()[particle.id])
+                .transition()
+                .duration(300)
+                .attr("fill", particle.color);
+        }
+        
+        // Window resize handler
+        window.addEventListener("resize", () => {
+            const newWidth = window.innerWidth;
+            const newHeight = window.innerHeight;
+            
+            svg.attr("width", newWidth).attr("height", newHeight);
+            
+            // Update particle boundaries
+            particles.forEach(p => {
+                p.x = Math.min(p.x, newWidth - p.radius);
+                p.y = Math.min(p.y, newHeight - p.radius);
+            });
+        });
+        
+        // Add some initial velocity variation
+        setInterval(() => {
+            particles.forEach(p => {
+                p.vx += (Math.random() - 0.5) * 0.5;
+                p.vy += (Math.random() - 0.5) * 0.5;
+            });
+        }, 2000);
+    </script>
+</body>
+</html>
